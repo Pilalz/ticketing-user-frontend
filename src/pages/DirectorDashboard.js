@@ -1,331 +1,339 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ticketsAPI } from '../services/api';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Calendar, Clock, Users } from 'lucide-react';
 
-function DirectorDashboard() {
-  const [stats, setStats] = useState({ waiting: 0, in_room: 0, completed: 0, total_today: 0 });
-  const [waitingTickets, setWaitingTickets] = useState([]);
-  const [inRoomTickets, setInRoomTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const navigate = useNavigate();
-
-  const user = JSON.parse(localStorage.getItem('user'));
+const useTabNotification = () => {
+  const [isBlinking, setIsBlinking] = useState(false);
+  const intervalRef = useRef(null);
+  const originalTitle = useRef(document.title);
 
   useEffect(() => {
-    fetchData();
-    // Auto refresh every 15 seconds
-    const interval = setInterval(fetchData, 15000);
-    return () => clearInterval(interval);
+    originalTitle.current = document.title;
+    
+    // Minta izin notifikasi saat komponen di-load
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) stopBlinking();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopCode();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
-  const fetchData = async () => {
-    try {
-      const [statsRes, waitingRes, inRoomRes] = await Promise.all([
-        ticketsAPI.getStats(),
-        ticketsAPI.getAll({ status: 'waiting' }),
-        ticketsAPI.getAll({ status: 'in_room' })
-      ]);
-      setStats(statsRes.data);
-      setWaitingTickets(waitingRes.data);
-      setInRoomTickets(inRoomRes.data);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
+  const startBlinking = (message) => {
+    if (!document.hidden) return; 
+
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    let showMessage = true;
+    intervalRef.current = setInterval(() => {
+      document.title = showMessage ? message : originalTitle.current;
+      showMessage = !showMessage;
+    }, 1000); 
+    setIsBlinking(true);
+  };
+
+  const stopBlinking = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    document.title = originalTitle.current;
+    setIsBlinking(false);
+  };
+
+  const stopCode = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+
+  const sendDesktopNotification = (title, body) => {
+    // Cek apakah browser support
+    if (!("Notification" in window)) return;
+
+    if (Notification.permission === "granted") {
+      // Tampilkan notifikasi
+      const notif = new Notification(title, {
+        body: body,
+        icon: 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png', // Ganti dengan URL logo aplikasimu
+        silent: true // Kita set true karena suaranya sudah dihandle oleh Audio element terpisah
+      });
+      
+      // Jika notifikasi diklik, fokuskan ke window browser
+      notif.onclick = function() {
+        window.focus();
+        this.close();
+      };
     }
   };
 
-  const handleStatusUpdate = async (ticketId, newStatus) => {
-    try {
-      await ticketsAPI.updateStatus(ticketId, newStatus);
-      fetchData(); // Refresh data
-    } catch (error) {
-      console.error('Error updating status:', error);
-      alert('Gagal mengubah status');
-    }
-  };
+  return { startBlinking, sendDesktopNotification };
+};
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
-  };
+export default function MeetingDashboard() {
+  const [meetings, setMeetings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState(5);
 
-  const formatDateTime = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('id-ID', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+  const API_URL = 'http://localhost:5000/api/tickets';
+
+  const prevMeetingCountRef = useRef(0);
+
+  const { startBlinking, sendDesktopNotification } = useTabNotification();
+
+  const playNotificationSound = () => {
+    // Ganti URL ini dengan file lokal kamu, misal: '/notification.mp3' jika ada di folder public
+    const audio = new Audio('/notification.mp3'); 
+    
+    // Browser modern kadang memblokir autoplay jika user belum pernah interaksi (klik) di halaman.
+    // Kita wrap dengan catch error agar app tidak crash jika diblokir browser.
+    audio.play().catch(err => {
+      console.log("Audio play failed (biasanya karena user belum interaksi dgn halaman):", err);
     });
   };
 
-  if (loading) {
-    return <div className="container">Loading...</div>;
-  }
+ const getCardStyle = (status) => {
+    const s = status ? status.toLowerCase() : '';
+
+    if (s === 'in the room') {
+      return 'bg-green-900 border-0 shadow-green-900/20';
+    }
+    return 'bg-blue-950 border-0 shadow-blue-900/20';
+  };
+
+  // Fetch meetings dari API
+  const fetchMeetings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(API_URL);
+      const result = await response.json();
+      
+      if (result.success) {
+        setMeetings(result.data);
+      } else {
+        setError('Failed to fetch meetings');
+      }
+    } catch (err) {
+      setError('Error connecting to server: ' + err.message);
+      console.error('Fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [API_URL]);
+
+  // Logic Trigger Notifikasi
+  useEffect(() => {
+    // Jika ada data baru
+    if (meetings.length > prevMeetingCountRef.current && prevMeetingCountRef.current !== 0) {
+      
+      const newCount = meetings.length;
+      
+      // 1. Title Blink
+      startBlinking(`🔔 (${newCount}) New Request!`);
+      
+      // 2. Audio
+      playNotificationSound();
+
+      // 3. DESKTOP POP-UP (Yang akan muncul di pojok Windows)
+      // Hanya kirim jika tab sedang tidak dilihat user (opsional logicnya)
+      if (document.hidden) {
+        sendDesktopNotification("New Guest Request!", `Ada tamu baru menunggu. Total: ${newCount}`);
+      }
+    }
+
+    prevMeetingCountRef.current = meetings.length;
+  }, [meetings, startBlinking, sendDesktopNotification]);
+
+  // Auto refresh
+  useEffect(() => {
+    fetchMeetings();
+    
+    if (autoRefresh) {
+      const interval = setInterval(() => {
+        fetchMeetings();
+      }, refreshInterval * 1000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [autoRefresh, refreshInterval, fetchMeetings]);
+
+  // Update status
+  const handleUpdateStatus = async (meetingId, newStatus) => {
+    // Konfirmasi sederhana agar tidak salah klik
+    if(!window.confirm(`Are you sure you want to change status to "${newStatus}"?`)) return;
+
+    try {
+      const response = await fetch(`${API_URL}/${meetingId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh data agar tampilan update otomatis
+        fetchMeetings(); 
+      } else {
+        alert('Failed to update status: ' + result.message);
+      }
+    } catch (err) {
+      alert('Error updating status: ' + err.message);
+      console.error('Update error:', err);
+    }
+  };
+
+  const renderActionButtons = (meeting) => {
+    const s = meeting.status ? meeting.status.toLowerCase() : '';
+
+    if (s === 'waiting') {
+      return (
+        <div className="flex gap-3 mt-auto pt-4 border-t border-white/20">
+          <button
+            onClick={() => handleUpdateStatus(meeting.rowid, 'In The Room')}
+            className="flex-1 bg-green-800 hover:bg-green-700 text-gray-100 text-sm font-bold py-2 rounded-lg transition shadow-md"
+          >
+            Approve
+          </button>
+          <button
+            onClick={() => handleUpdateStatus(meeting.rowid, 'Reject')}
+            className="flex-1 bg-red-800 hover:bg-red-700 text-gray-100 text-sm font-bold py-2 rounded-lg transition shadow-md"
+          >
+            Reject
+          </button>
+        </div>
+      );
+    }
+
+    if (s === 'in the room') {
+      return (
+        <div className="mt-auto pt-4 border-t border-white/20">
+          <button
+            onClick={() => handleUpdateStatus(meeting.rowid, 'Finished')}
+            className="w-full bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold py-2 rounded-lg transition shadow-md"
+          >
+            Finish
+          </button>
+        </div>
+      );
+    }
+
+    return null; // Status lain (Completed/Cancelled) tidak ada tombol
+  };
+
+  // Format date
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('id-ID', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+  };
+
+  // Format time
+  const formatTime = (timeString) => {
+    return timeString.substring(0, 5); // HH:MM
+  };
 
   return (
-    <div>
-      <nav className="navbar">
-        <div className="container">
-          <h1>Dashboard Mister</h1>
-          <div className="navbar-user">
-            <span>Selamat datang, {user?.full_name}</span>
-            <span style={{ fontSize: '12px', opacity: 0.8, marginLeft: '10px' }}>
-              🔄 Auto-refresh setiap 30 detik
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-neutral-900">
+      <div className="mx-auto">
+        
+        {/* Header */}
+        <div className="bg-gray-800 shadow-lg p-5">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold text-gray-200">Guest</h1>
+            <span className="flex items-center gap-2 text-gray-200">
+              <Calendar className="w-4 h-4" />
+              Total Meetings Request: <strong>{meetings.length}</strong>
             </span>
-            <button 
-              className="btn btn-secondary" 
-              onClick={fetchData}
-              style={{ marginLeft: '15px', padding: '8px 16px' }}
-            >
-              🔄 Refresh
-            </button>
-            <button className="btn btn-secondary" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
-
-      <div className="container">
-        <div className="stats-grid">
-          <div className="stat-card">
-            <h3>Menunggu</h3>
-            <div className="stat-value" style={{ color: '#3498db' }}>{stats.waiting}</div>
-          </div>
-          <div className="stat-card">
-            <h3>Di Ruangan</h3>
-            <div className="stat-value" style={{ color: '#27ae60' }}>{stats.in_room}</div>
-          </div>
-          <div className="stat-card">
-            <h3>Selesai Hari Ini</h3>
-            <div className="stat-value" style={{ color: '#95a5a6' }}>{stats.completed}</div>
-          </div>
-          <div className="stat-card">
-            <h3>Total Hari Ini</h3>
-            <div className="stat-value" style={{ color: '#9b59b6' }}>{stats.total_today}</div>
+            {loading && <span className="text-gray-200">Loading...</span>}         
           </div>
         </div>
 
-        {/* Menunggu Section */}
-        <div style={{ marginBottom: '40px' }}>
-          <h2 style={{ marginBottom: '20px', color: '#2c3e50' }}>
-            Tamu Menunggu ({waitingTickets.length})
-          </h2>
-          {waitingTickets.length === 0 ? (
-            <p style={{ color: '#7f8c8d', fontStyle: 'italic' }}>Tidak ada tamu yang menunggu.</p>
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-6 py-4 rounded-lg mb-6">
+            <strong>Error:</strong> {error}
+          </div>
+        )}
+
+        {/* Meetings List */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-5">
+          {meetings.length === 0 ? (
+            <div className="bg-gray-800 rounded-xl shadow-lg p-12 text-center">
+              <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-200 mb-2">No Meetings Found</h3>
+              <p className="text-gray-300">There are no meetings today.</p>
+            </div>
           ) : (
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', 
-              gap: '20px' 
-            }}>
-              {waitingTickets.map((ticket) => (
-                <div 
-                  key={ticket.id} 
-                  style={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    borderRadius: '12px',
-                    padding: '24px',
-                    color: 'white',
-                    boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
-                    transition: 'transform 0.3s',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-5px)'}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                >
-                  <div style={{ marginBottom: '16px' }}>
-                    <h3 style={{ margin: '0 0 8px 0', fontSize: '20px' }}>{ticket.guest_name}</h3>
-                    {ticket.company && (
-                      <p style={{ margin: '0 0 4px 0', opacity: 0.9, fontSize: '14px' }}>
-                        🏢 {ticket.company}
-                      </p>
-                    )}
-                    {ticket.phone && (
-                      <p style={{ margin: '0 0 4px 0', opacity: 0.9, fontSize: '14px' }}>
-                        📞 {ticket.phone}
-                      </p>
-                    )}
-                    <p style={{ margin: '8px 0 0 0', opacity: 0.9, fontSize: '14px' }}>
-                      🕐 {formatDateTime(ticket.appointment_time)}
-                    </p>
-                  </div>
-                  
-                  <div style={{ 
-                    background: 'rgba(255, 255, 255, 0.2)', 
-                    borderRadius: '8px', 
-                    padding: '12px',
-                    marginBottom: '16px'
-                  }}>
-                    <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
-                      <strong>Keperluan:</strong><br />
-                      {ticket.purpose}
-                    </p>
-                  </div>
+            meetings.map((meeting) => (
+              <div
+                key={meeting.rowid}
+                className={`rounded-xl shadow-xl p-6 flex flex-col justify-between h-full min-h-[220px] border ${getCardStyle(meeting.status)}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-xl font-bold text-gray-200">
+                        {meeting.subject}
+                      </h3>                      
+                    </div>
 
-                  <div style={{ 
-                    display: 'flex', 
-                    gap: '10px',
-                    marginTop: '16px'
-                  }}>
-                    <button
-                      onClick={() => handleStatusUpdate(ticket.id, 'in_room')}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#27ae60',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        transition: 'background 0.3s'
-                      }}
-                      onMouseEnter={(e) => e.target.style.background = '#229954'}
-                      onMouseLeave={(e) => e.target.style.background = '#27ae60'}
-                    >
-                      ✓ Accept
-                    </button>
-                    <button
-                      onClick={() => handleStatusUpdate(ticket.id, 'rejected')}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#e74c3c',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        transition: 'background 0.3s'
-                      }}
-                      onMouseEnter={(e) => e.target.style.background = '#c0392b'}
-                      onMouseLeave={(e) => e.target.style.background = '#e74c3c'}
-                    >
-                      ✗ Reject
-                    </button>
+                    <div className="flex items-center gap-6 text-sm text-gray-200 mb-3">
+                      <span className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4" />
+                        {formatDate(meeting.date)}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <Clock className="w-4 h-4" />
+                        {formatTime(meeting.time)}
+                      </span>
+                    </div>                    
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Di Ruangan Section */}
-        <div>
-          <h2 style={{ marginBottom: '20px', color: '#2c3e50' }}>
-            Tamu Di Ruangan ({inRoomTickets.length})
-          </h2>
-          {inRoomTickets.length === 0 ? (
-            <p style={{ color: '#7f8c8d', fontStyle: 'italic' }}>Tidak ada tamu di ruangan.</p>
-          ) : (
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', 
-              gap: '20px' 
-            }}>
-              {inRoomTickets.map((ticket) => (
-                <div 
-                  key={ticket.id} 
-                  style={{
-                    background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)',
-                    borderRadius: '12px',
-                    padding: '24px',
-                    color: 'white',
-                    boxShadow: '0 4px 15px rgba(17, 153, 142, 0.4)',
-                    transition: 'transform 0.3s',
-                    cursor: 'pointer'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-5px)'}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-                >
-                  <div style={{ marginBottom: '16px' }}>
-                    <h3 style={{ margin: '0 0 8px 0', fontSize: '20px' }}>{ticket.guest_name}</h3>
-                    {ticket.company && (
-                      <p style={{ margin: '0 0 4px 0', opacity: 0.9, fontSize: '14px' }}>
-                        🏢 {ticket.company}
-                      </p>
-                    )}
-                    {ticket.phone && (
-                      <p style={{ margin: '0 0 4px 0', opacity: 0.9, fontSize: '14px' }}>
-                        📞 {ticket.phone}
-                      </p>
-                    )}
-                    <p style={{ margin: '8px 0 0 0', opacity: 0.9, fontSize: '14px' }}>
-                      🕐 {formatDateTime(ticket.appointment_time)}
-                    </p>
+                {/* Participants */}
+                {meeting.participants && meeting.participants.length > 0 && (
+                  <div className="border-b pb-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Users className="w-4 h-4 text-gray-200" />
+                      <h4 className="font-semibold text-gray-200">
+                        Participants ({meeting.participants.length})
+                      </h4>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2">
+                      {meeting.participants.map((participant) => (
+                        <div
+                          key={participant.rowid}
+                          className="flex items-center gap-2 p-2 bg-gradient-to-r from-gray-700 to-gray-600 rounded-lg border border-gray-500"
+                        >
+                          <span className="text-sm font-medium text-gray-200">
+                            {participant.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  
-                  <div style={{ 
-                    background: 'rgba(255, 255, 255, 0.2)', 
-                    borderRadius: '8px', 
-                    padding: '12px',
-                    marginBottom: '16px'
-                  }}>
-                    <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5' }}>
-                      <strong>Keperluan:</strong><br />
-                      {ticket.purpose}
-                    </p>
-                  </div>
-
-                  <div style={{ 
-                    display: 'flex', 
-                    gap: '10px',
-                    marginTop: '16px'
-                  }}>
-                    <button
-                      onClick={() => handleStatusUpdate(ticket.id, 'completed')}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#3498db',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        transition: 'background 0.3s'
-                      }}
-                      onMouseEnter={(e) => e.target.style.background = '#2980b9'}
-                      onMouseLeave={(e) => e.target.style.background = '#3498db'}
-                    >
-                      ✓ Complete
-                    </button>
-                    <button
-                      onClick={() => handleStatusUpdate(ticket.id, 'rejected')}
-                      style={{
-                        flex: 1,
-                        padding: '12px',
-                        border: 'none',
-                        borderRadius: '8px',
-                        background: '#e74c3c',
-                        color: 'white',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        cursor: 'pointer',
-                        transition: 'background 0.3s'
-                      }}
-                      onMouseEnter={(e) => e.target.style.background = '#c0392b'}
-                      onMouseLeave={(e) => e.target.style.background = '#e74c3c'}
-                    >
-                      ✗ Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                )}
+                {renderActionButtons(meeting)}
+              </div>
+            ))
           )}
         </div>
       </div>
     </div>
   );
 }
-
-export default DirectorDashboard;

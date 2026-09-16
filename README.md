@@ -11,7 +11,7 @@ A modern, high-performance **Executive Meeting & Guest Approval Dashboard** buil
 ---
 
 ## 📸 Preview & User Experience
-![ticketing-guest-frontend](./public/Screenshot1.png)
+![ticketing-guest-frontend](./public/Screenshot.png)
 ---
 
 ## 🌟 Key Features & Engineering Highlights

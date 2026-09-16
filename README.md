@@ -11,28 +11,7 @@ A modern, high-performance **Executive Meeting & Guest Approval Dashboard** buil
 ---
 
 ## 📸 Preview & User Experience
-
-<!-- Tempat untuk screenshot atau GIF demo dashboard -->
-> **Tip for Portfolio**: Masukkan screenshot atau demo GIF interaktif aplikasi Anda di bawah ini untuk memikat recruiter/klien dalam 3 detik pertama.
-
-```
-+----------------------------------------------------------------------------------------------------+
-|  📅 Guest                     Total Meeting Requests: 4  [🟢 Syncing...]                           |
-+--------------------------------------------------+-------------------------------------------------+
-|  ◀  📅 September 2026  ▶    [Today]              |  Wednesday, 16 September 2026      (2 Meetings) |
-+--------------------------------------------------+-------------------------------------------------+
-|  MIN  SEN  SEL  RAB  KAM  JUM  SAB               |  [ 🟢 In The Room ]                             |
-|  [ 1] [ 2] [ 3] [ 4] [ 5] [ 6] [ 7]              |  Pembahasan Kerjasama Vendor                    |
-|  [ 8] [ 9] [10] [11] [12] [13] [14]              |  🕒 09:30 WIB | Peserta: John Doe, Jane         |
-|  [15] [16] [17] [18] [19] [20] [21]              |  [ Finish Meeting ]                             |
-|       🟢 2 Meetings                              |-------------------------------------------------|
-|  [22] [23] [24] [25] [26] [27] [28]              |  [ 🔵 Waiting ]                                 |
-|  [29] [30]                                       |  Review Anggaran Q4                             |
-|                                                  |  🕒 13:00 WIB | Peserta: Budi Santoso           |
-|                                                  |  [ Approve ]  [ Reject ]  [ Reschedule ]        |
-+--------------------------------------------------+-------------------------------------------------+
-```
-
+![ticketing-admin-frontend](./public/Screenshot1.png)
 ---
 
 ## 🌟 Key Features & Engineering Highlights
@@ -201,7 +180,7 @@ This frontend dashboard seamlessly integrates with the REST API provided by `tic
 ## 👤 Author & Connect
 
 **Pilal**  
-- **GitHub**: [@Pilalz](https://github.com/Pilalz) / [@simonaditiabbp](https://github.com/simonaditiabbp)  
+- **GitHub**: [@Pilalz](https://github.com/Pilalz)
 - **Role**: Frontend / Full-Stack Developer  
 
 ---
